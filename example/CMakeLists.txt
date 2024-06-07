@@ -1,4 +1,4 @@
-include_directories(../src)
+include_directories(${PROJECT_SOURCE_DIR}/src)
 
 set (DEDISP_TEST_OBJS
   gasdev.c
@@ -10,3 +10,9 @@ add_library(dedisp_test ${DEDISP_TEST_OBJS})
 
 add_executable(testdedisp testdedisp.c)
 target_link_libraries(testdedisp PUBLIC dedisp dedisp_test -lm)
+
+# Install library
+install(TARGETS dedisp_test LIBRARY DESTINATION lib)
+
+# Install executables
+install(TARGETS testdedisp RUNTIME DESTINATION bin)

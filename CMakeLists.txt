@@ -78,6 +78,22 @@ endif(GIT_FOUND)
 option(DEDISP_TEXTURE "Use texture support (reference/obj)" ON)
 add_compile_definitions(DEDISP_USE_TEXTURE=${DEDISP_USE_TEXTURE} DEDISP_TEXTURE)
 
+option(DEDISP_BUILD_TESTS "Build test suite" ON)
+
 # Add src, tests
 add_subdirectory(src)
-add_subdirectory(example)
+
+if(DEDISP_BUILD_TESTS)
+  add_subdirectory(example)
+endif()
+
+# Install project cmake targets
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  ${PROJECT_NAME}-config-version.cmake
+  VERSION ${DEDISP_VERSION}
+  COMPATIBILITY AnyNewerVersion
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/cmake/${PROJECT_NAME}
+)
