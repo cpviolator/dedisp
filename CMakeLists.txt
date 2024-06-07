@@ -75,6 +75,8 @@ if(GIT_FOUND)
   endif()
 endif(GIT_FOUND)
 
+option(DEDISP_TEXTURE "Use texture support (reference/obj)" ON)
+add_compile_definitions(DEDISP_USE_TEXTURE=${DEDISP_USE_TEXTURE} DEDISP_TEXTURE)
 
 # Add src, tests
 add_subdirectory(src)

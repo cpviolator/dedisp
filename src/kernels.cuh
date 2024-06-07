@@ -28,8 +28,8 @@
 
 // CUDA deprecations
 #include <cuda_runtime_api.h>
-#if CUDART_VERSION < 12000
-#define DEDISP_HAVE_TEXTURE_SUPPORT
+#if (CUDART_VERSION < 12000) && defined (DEDISP_USE_TEXTURE) 
+#define DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT
 #endif
 
 // Kernel tuning parameters
@@ -40,7 +40,7 @@
 __constant__ dedisp_float c_delay_table[DEDISP_MAX_NCHANS];
 __constant__ dedisp_bool  c_killmask[DEDISP_MAX_NCHANS];
 
-#ifdef DEDISP_HAVE_TEXTURE_SUPPORT
+#if defined (DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT)
 // Texture reference for input data
 texture<dedisp_word, 1, cudaReadModeElementType> t_in;
 #endif
@@ -164,8 +164,7 @@ void set_out_val(dedisp_byte* d_out, dedisp_size idx,
 //       E.g., Words bracketed: (t0c0,t0c1,t0c2,t0c3), (t1c0,t1c1,t1c2,t1c3),...
 // Note: out_stride should be in units of samples
 template<int IN_NBITS, int SAMPS_PER_THREAD,
-		 int BLOCK_DIM_X, int BLOCK_DIM_Y,
-		 bool USE_TEXTURE_MEM>
+		 int BLOCK_DIM_X, int BLOCK_DIM_Y>
 __global__
 void dedisperse_kernel(const dedisp_word*  d_in,
                        dedisp_size         nsamps,
@@ -184,9 +183,15 @@ void dedisperse_kernel(const dedisp_word*  d_in,
                        dedisp_size         batch_in_stride,
                        dedisp_size         batch_dm_stride,
                        dedisp_size         batch_chan_stride,
-                       dedisp_size         batch_out_stride)
+                       dedisp_size         batch_out_stride
+#if !defined (DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT) && defined (DEDISP_USE_TEXTURE)
+		       // Add explicit texture arg
+		       , cudaTextureObject_t t_in
+#endif
+		       )
+
 {
-	// Compute compile-time constants
+        // Compute compile-time constants
 	enum {
 		BITS_PER_BYTE  = 8,
 		CHANS_PER_WORD = sizeof(dedisp_word) * BITS_PER_BYTE / IN_NBITS
@@ -241,36 +246,25 @@ void dedisperse_kernel(const dedisp_word*  d_in,
 				// Compute the integer delay
 				dedisp_size delay = __float2uint_rn(dm * frac_delay);
 				
-#ifdef DEDISP_HAVE_TEXTURE_SUPPORT
-				if( USE_TEXTURE_MEM ) { // Pre-Fermi path
-					// Loop over samples per thread
-					// Note: Unrolled to ensure the sum[] array is stored in regs
-                    #pragma unroll
-					for( dedisp_size s=0; s<SAMPS_PER_THREAD; ++s ) {
-						// Grab the word containing the sample from texture mem
-						dedisp_word sample = tex1Dfetch(t_in, offset+s + delay);
-						
-						// Extract the desired subword and accumulate
-						sum[s] +=
-							// TODO: Pre-Fermi cards are faster with 24-bit mul
-							/*__umul24*/(c_killmask[chan_idx] *//,
-									 extract_subword<IN_NBITS>(sample,chan_sub));
-					}
-				}
-				else 
+				// Loop over samples per thread
+				// Note: Unrolled to ensure the sum[] array is stored in regs
+#pragma unroll
+				for( dedisp_size s=0; s<SAMPS_PER_THREAD; ++s ) {
+				  // Grab the word containing the sample from texture mem
+#if defined (DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT) && defined (DEDISP_USE_TEXTURE)
+				  dedisp_word sample = tex1Dfetch(t_in, offset+s + delay);
+#elif !defined (DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT) && defined (DEDISP_USE_TEXTURE)
+				  dedisp_word sample = tex1Dfetch<dedisp_word>(t_in, offset+s + delay);
+#elif !defined (DEDISP_USE_TEXTURE)
+				  dedisp_word sample = d_in[offset + s + delay];
+#else
+#error "Suspect texture preprcessor definitions"
 #endif
-				{ // Fermi path
-					// Note: Unrolled to ensure the sum[] array is stored in regs
-                    #pragma unroll
-					for( dedisp_size s=0; s<SAMPS_PER_THREAD; ++s ) {
-						// Grab the word containing the sample from global mem
-						dedisp_word sample = d_in[offset + s + delay];
-						
-						// Extract the desired subword and accumulate
-						sum[s] +=
-							c_killmask[chan_idx] *
-							extract_subword<IN_NBITS>(sample, chan_sub);
-					}
+				  // Extract the desired subword and accumulate
+				  sum[s] +=
+				    // TODO: Pre-Fermi cards are faster with 24-bit mul
+				    /*__umul24*/(c_killmask[chan_idx] *//,
+						 extract_subword<IN_NBITS>(sample,chan_sub));
 				}
 			}
 		}
@@ -315,20 +309,6 @@ void dedisperse_kernel(const dedisp_word*  d_in,
 	} // End of DM loop
 }
 
-bool check_use_texture_mem() {
-#ifdef DEDISP_HAVE_TEXTURE_SUPPORT
-	// Decides based on GPU architecture
-	int device_idx;
-	cudaGetDevice(&device_idx);
-	cudaDeviceProp device_props;
-	cudaGetDeviceProperties(&device_props, device_idx);
-	// Fermi runs worse with texture mem
-	bool use_texture_mem = (device_props.major < 2);
-	return use_texture_mem;
-#else
-	return false;
-#endif
-}
 
 bool dedisperse(const dedisp_word*  d_in,
                 dedisp_size         in_stride,
@@ -356,32 +336,44 @@ bool dedisperse(const dedisp_word*  d_in,
 		MAX_CUDA_GRID_SIZE_Y     = 65535,
 		MAX_CUDA_1D_TEXTURE_SIZE = (1<<27)
 	};
-	
-#ifdef DEDISP_HAVE_TEXTURE_SUPPORT
-	// Initialise texture memory if necessary
+#if defined (DEDISP_USE_TEXTURE)
+	// Initialise texture memory
 	// --------------------------------------
-	// Determine whether we should use texture memory
-	bool use_texture_mem = check_use_texture_mem();
-	if( use_texture_mem ) {
-		dedisp_size chans_per_word = sizeof(dedisp_word)*BITS_PER_BYTE / in_nbits;
-		dedisp_size nchan_words    = nchans / chans_per_word;
-		dedisp_size input_words    = in_stride * nchan_words;
-		
-		// Check the texture size limit
-		if( input_words > MAX_CUDA_1D_TEXTURE_SIZE ) {
-			return false;
-		}
-		// Bind the texture memory
-		cudaChannelFormatDesc channel_desc = cudaCreateChannelDesc<dedisp_word>();
-		cudaBindTexture(0, t_in, d_in, channel_desc,
-						input_words * sizeof(dedisp_word));
-#ifdef DEDISP_DEBUG
-		cudaError_t cuda_error = cudaGetLastError();
-		if( cuda_error != cudaSuccess ) {
-			return false;
-		}
-#endif // DEDISP_DEBUG
+	dedisp_size chans_per_word = sizeof(dedisp_word)*BITS_PER_BYTE / in_nbits;
+	dedisp_size nchan_words    = nchans / chans_per_word;
+	dedisp_size input_words    = in_stride * nchan_words;
+	
+	// Check the texture size limit
+	if( input_words > MAX_CUDA_1D_TEXTURE_SIZE ) {
+	  return false;
 	}
+	// Bind the texture memory
+	cudaChannelFormatDesc channel_desc = cudaCreateChannelDesc<dedisp_word>();
+#ifdef DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT
+	// Bind texture reference (legacy)
+	cudaBindTexture(0, t_in, d_in, channel_desc, input_words * sizeof(dedisp_word));	
+#else
+	// Create texture object
+	cudaResourceDesc resDesc;
+	memset(&resDesc, 0, sizeof(resDesc));
+	resDesc.resType = cudaResourceTypeLinear;
+	resDesc.res.linear.devPtr = (dedisp_word*)d_in;
+	resDesc.res.linear.desc = channel_desc;
+	resDesc.res.linear.sizeInBytes = input_words * sizeof(dedisp_word);
+	
+	cudaTextureDesc texDesc;
+	memset(&texDesc, 0, sizeof(texDesc));
+	texDesc.readMode = cudaReadModeElementType;
+	
+	cudaTextureObject_t t_in=0;
+	cudaCreateTextureObject(&t_in, &resDesc, &texDesc, NULL);
+#endif
+#ifdef DEDISP_DEBUG
+	cudaError_t cuda_error = cudaGetLastError();
+	if( cuda_error != cudaSuccess ) {
+	  return false;
+	}
+#endif // DEDISP_DEBUG
 #endif
 	// --------------------------------------
 	
@@ -413,58 +405,71 @@ bool dedisperse(const dedisp_word*  d_in,
 	cudaStream_t stream = 0;
 	
 	// Execute the kernel
-#define DEDISP_CALL_KERNEL(NBITS, USE_TEXTURE_MEM)						\
-	dedisperse_kernel<NBITS,DEDISP_SAMPS_PER_THREAD,BLOCK_DIM_X,        \
-		              BLOCK_DIM_Y,USE_TEXTURE_MEM>                      \
-		<<<grid, block, 0, stream>>>(d_in,								\
-									 nsamps,							\
-									 nsamps_reduced,					\
-									 nsamp_blocks,						\
-									 in_stride,							\
-									 dm_count,							\
-									 dm_stride,							\
-									 ndm_blocks,						\
-									 nchans,							\
-									 chan_stride,						\
-									 d_out,								\
-									 out_nbits,							\
-									 out_stride,						\
-									 d_dm_list,							\
-									 batch_in_stride,					\
-									 batch_dm_stride,					\
-									 batch_chan_stride,					\
-									 batch_out_stride)
-	// Note: Here we dispatch dynamically on nbits for supported values
-#ifdef DEDISP_HAVE_TEXTURE_SUPPORT
-	if( use_texture_mem ) {
-		switch( in_nbits ) {
-			case 1:  DEDISP_CALL_KERNEL(1,true);  break;
-			case 2:  DEDISP_CALL_KERNEL(2,true);  break;
-			case 4:  DEDISP_CALL_KERNEL(4,true);  break;
-			case 8:  DEDISP_CALL_KERNEL(8,true);  break;
-			case 16: DEDISP_CALL_KERNEL(16,true); break;
-			case 32: DEDISP_CALL_KERNEL(32,true); break;
-			default: /* should never be reached */ break;
-		}
-	}
-	else
+#if defined (DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT) || !defined (DEDISP_USE_TEXTURE)
+#define DEDISP_CALL_KERNEL(NBITS)					\
+	dedisperse_kernel<NBITS,DEDISP_SAMPS_PER_THREAD,BLOCK_DIM_X,	\
+			  BLOCK_DIM_Y>					\
+	  <<<grid, block, 0, stream>>>(d_in,				\
+	  nsamps,							\
+	  nsamps_reduced,						\
+	  nsamp_blocks,							\
+	  in_stride,							\
+	  dm_count,							\
+	  dm_stride,							\
+	  ndm_blocks,							\
+	  nchans,							\
+	  chan_stride,							\
+	  d_out,							\
+	  out_nbits,							\
+	  out_stride,							\
+	  d_dm_list,							\
+	  batch_in_stride,						\
+	  batch_dm_stride,						\
+	  batch_chan_stride,						
+	batch_out_stride)
+#else
+#define DEDISP_CALL_KERNEL(NBITS)					\
+  dedisperse_kernel<NBITS,DEDISP_SAMPS_PER_THREAD,BLOCK_DIM_X,		\
+		    BLOCK_DIM_Y>					\
+  <<<grid, block, 0, stream>>>(d_in,					\
+			       nsamps,					\
+			       nsamps_reduced,				\
+			       nsamp_blocks,				\
+			       in_stride,				\
+			       dm_count,				\
+			       dm_stride,				\
+			       ndm_blocks,				\
+			       nchans,					\
+			       chan_stride,				\
+			       d_out,					\
+			       out_nbits,				\
+			       out_stride,				\
+			       d_dm_list,				\
+			       batch_in_stride,				\
+			       batch_dm_stride,				\
+			       batch_chan_stride,			\
+			       batch_out_stride,			\
+			       t_in)
 #endif
-	{
-		switch( in_nbits ) {
-			case 1:  DEDISP_CALL_KERNEL(1,false);  break;
-			case 2:  DEDISP_CALL_KERNEL(2,false);  break;
-			case 4:  DEDISP_CALL_KERNEL(4,false);  break;
-			case 8:  DEDISP_CALL_KERNEL(8,false);  break;
-			case 16: DEDISP_CALL_KERNEL(16,false); break;
-			case 32: DEDISP_CALL_KERNEL(32,false); break;
-			default: /* should never be reached */ break;
-		}
+	
+	switch( in_nbits ) {
+	case 1:  DEDISP_CALL_KERNEL(1);  break;
+	case 2:  DEDISP_CALL_KERNEL(2);  break;
+	case 4:  DEDISP_CALL_KERNEL(4);  break;
+	case 8:  DEDISP_CALL_KERNEL(8);  break;
+	case 16: DEDISP_CALL_KERNEL(16); break;
+	case 32: DEDISP_CALL_KERNEL(32); break;
+	default: /* should never be reached */ break;
 	}
 #undef DEDISP_CALL_KERNEL
-		
-	// Check for kernel errors
+
+#if defined (DEDISP_USE_TEXTURE) && !defined (DEDISP_HAVE_LEGACY_TEXTURE_SUPPORT)
+cudaDestroyTextureObject(t_in); 
+#endif
+
+// Check for kernel errors
 #ifdef DEDISP_DEBUG
-	//cudaStreamSynchronize(stream);
+//cudaStreamSynchronize(stream);
 	cudaDeviceSynchronize();
 	cudaError_t cuda_error = cudaGetLastError();
 	if( cuda_error != cudaSuccess ) {
