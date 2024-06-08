@@ -5,8 +5,9 @@ set (DEDISP_TEST_OBJS
   ran1.c
   )
 
-# generate a cmake object library for all test files
+# generate libs
 add_library(dedisp_test ${DEDISP_TEST_OBJS})
+set_target_properties(dedisp_test PROPERTIES POSITION_INDEPENDENT_CODE ${BUILD_SHARED_LIBS})
 
 add_executable(testdedisp testdedisp.c)
 target_link_libraries(testdedisp PUBLIC dedisp dedisp_test -lm)

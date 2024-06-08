@@ -1,17 +1,18 @@
+# Object files
 set (DEDISP_OBJS
   dedisp.cu
   )
 
-# generate a cmake object library for all cu files
-add_library(dedisp ${DEDISP_OBJS})
-
-# make one library
-set(DEDISP_LIB dedisp)
-
-# Install headers
+# Headers
 set(DEDISP_HEADERS
   dedisp.h
   )
+
+# generate libs
+add_library(dedisp ${DEDISP_OBJS})
+set_target_properties(dedisp PROPERTIES POSITION_INDEPENDENT_CODE ${BUILD_SHARED_LIBS})
+
+# Install headers
 install(FILES ${DEDISP_HEADERS} DESTINATION include)
 
 # Install lib

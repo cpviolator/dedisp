@@ -79,6 +79,19 @@ option(DEDISP_TEXTURE "Use texture support (reference/obj)" ON)
 add_compile_definitions(DEDISP_USE_TEXTURE=${DEDISP_USE_TEXTURE} DEDISP_TEXTURE)
 
 option(DEDISP_BUILD_TESTS "Build test suite" ON)
+option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
+
+# Print the configuration details to stdout
+message(STATUS "")
+message(STATUS "${PROJECT_NAME} ${PROJECT_VERSION} (${GITVERSION}) **")
+message(STATUS "cmake version: ${CMAKE_VERSION}")
+message(STATUS "Source location: ${CMAKE_SOURCE_DIR}")
+message(STATUS "Build location: ${CMAKE_BINARY_DIR}")
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "DEDISP target: ${DEDISP_TARGET_TYPE}")
+message(STATUS "DEDISP texture: ${DEDISP_TEXTURE}")
+message(STATUS "DEDISP build tests: ${DEDISP_BUILD_TESTS}")
+message(STATUS "DEDISP build shared libs: ${BUILD_SHARED_LIBS}")
 
 # Add src, tests
 add_subdirectory(src)
