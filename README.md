@@ -15,7 +15,7 @@ and optional install path
             -DDEDISP_BUILD_TESTS=ON \
             -DBUILD_SHARED_LIBS=ON \
             -DCMAKE_CUDA_ARCHITECTURES=70 \
-            -DCMAKE_INSTALL_PREFIX="/scratch/CPviolator/work/DSA110/dedisp_local/install" \
+            -DCMAKE_INSTALL_PREFIX="/path/to/install" \
             -DCMAKE_CUDA_COMPILER="/path/to/nvcc" ../dedisp`
 
 Alternatively, use the CMake GUI via
