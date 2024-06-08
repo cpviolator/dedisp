@@ -13,6 +13,7 @@ and optional install path
 
   3. `cmake -DDEDISP_USE_TEXTURE=ON \
             -DDEDISP_BUILD_TESTS=ON \
+            -DBUILD_SHARED_LIBS=ON \
             -DCMAKE_CUDA_ARCHITECTURES=70 \
             -DCMAKE_INSTALL_PREFIX="/scratch/CPviolator/work/DSA110/dedisp_local/install" \
             -DCMAKE_CUDA_COMPILER="/path/to/nvcc" ../dedisp`
@@ -34,4 +35,4 @@ Using Makefile
       * `GPU_ARCH = sm_60`
   3.  `make && make install`
   
-  Either of these will build a shared object library named `libdedisp.so` which is a prerequisite for Heimdall. The dedisp header files will be installed into `INSTALL_DIR/include`, the test and runtime library into `INSTALL_DIR/lib` and the test executable into `INSTALL_DIR/bin`. The `CMake` method will build a static libray `libdedisp.a` in addition to `libdedisp.so` 
+  Either of these will build a shared object library named `libdedisp.so` which is a prerequisite for Heimdall. The dedisp header files will be installed into `INSTALL_DIR/include`, the test and runtime library into `INSTALL_DIR/lib`. The CMake method will build static libraries `libdedisp.a, libdedisp_test.a` or a shared libraries `libdedisp.so, libdedisp_test.so` via the CMake variable `BUILD_SHARED_LIBS`. Install locations are unchanged, with the additions that the test executable will be placed into `INSTALL_DIR/bin` and `libdedisp_test.a/so` will be placed in `INSTALL_DIR/lib`. CMake's usual boiler plate configuration files are in the CMake default paths.
