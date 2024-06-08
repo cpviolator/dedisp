@@ -3,7 +3,7 @@ This repositry is derived from Ben Barsdell's original GPU De-dedispersion libra
 
 Installation Instructions (CMake):
 
-Using command line CMake
+## Using command line CMake
 
   1. `git clone https://github.com/ajameson/dedisp.git`
   2. `mkdir build; cd build`
@@ -26,7 +26,7 @@ Last, make (and install) the componenets
 
   4. `make -j install`
 
-Using Makefile
+## Using Makefile
 
   1.  `git clone https://github.com/ajameson/dedisp.git`
   2.  Update `Makefile.inc` with your CUDA path, Install Dir and GPU architecture. e.g.
